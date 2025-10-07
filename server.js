@@ -2,7 +2,7 @@ const express = require('express');
 const multer = require('multer');
 const ffmpeg = require('fluent-ffmpeg');
 const path = require('path');
-const fs = require('fs').promises; // 使用 promise 版本的 fs，支持 async/await
+const fs = require('fs').promises;
 const { v4: uuidv4 } = require('uuid');
 const { Octokit } = require('@octokit/rest');
 
@@ -30,17 +30,18 @@ const storage = multer.diskStorage({
   }
 });
 
-// 配置 multer：限制文件大小为 150MB
+// 配置 multer：限制文件大小为 150MB，支持B站m4s格式
 const upload = multer({
   storage: storage,
   limits: { fileSize: 150 * 1024 * 1024 }, // 150MB
   fileFilter: (req, file, cb) => {
-    // 简单的文件类型检查
-    if (file.fieldname === 'video' && !file.originalname.match(/\.(mp4|mov|avi)$/)) {
-      return cb(new Error('Only video files are allowed!'), false);
+    // 视频文件支持mp4、mov、avi、m4s
+    if (file.fieldname === 'video' && !file.originalname.match(/\.(mp4|mov|avi|m4s)$/)) {
+      return cb(new Error('Only video files (mp4, mov, avi, m4s) are allowed!'), false);
     }
-    if (file.fieldname === 'audio' && !file.originalname.match(/\.(mp3|wav|m4a)$/)) {
-      return cb(new Error('Only audio files are allowed!'), false);
+    // 音频文件支持mp3、wav、m4a、m4s
+    if (file.fieldname === 'audio' && !file.originalname.match(/\.(mp3|wav|m4a|m4s)$/)) {
+      return cb(new Error('Only audio files (mp3, wav, m4a, m4s) are allowed!'), false);
     }
     cb(null, true);
   }
@@ -136,9 +137,16 @@ app.post('/merge', authenticateKey, upload.fields([
     
   } catch (err) {
     console.error('API Error:', err);
-    res.status(500).json({ 
-      error: err.message || 'An unexpected error occurred'
-    });
+    // 区分不同类型错误，返回更明确的信息
+    if (err.message.includes('Only video files') || err.message.includes('Only audio files')) {
+      res.status(400).json({ error: err.message });
+    } else if (err.message.includes('Video merge failed')) {
+      res.status(500).json({ error: 'Video merging process failed: ' + err.message.split(': ').slice(1).join(': ') });
+    } else if (err.message.includes('upload to GitHub')) {
+      res.status(500).json({ error: 'Failed to upload to GitHub: ' + err.message });
+    } else {
+      res.status(500).json({ error: err.message || 'An unexpected error occurred' });
+    }
   } finally {
     // 确保文件被清理，无论成功还是失败
     try {
@@ -163,6 +171,7 @@ app.listen(PORT, () => {
   console.log('Environment configured:', {
     GITHUB_USER: GITHUB_USER ? 'Set' : 'Not Set',
     GITHUB_REPO: GITHUB_REPO ? 'Set' : 'Not Set',
-    API_SECRET_KEY: API_SECRET_KEY ? 'Set' : 'Not Set'
+    API_SECRET_KEY: API_SECRET_KEY ? 'Set' : 'Not Set',
+    GITHUB_TOKEN: GITHUB_TOKEN ? 'Set' : 'Not Set'
   });
 });
